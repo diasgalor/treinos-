@@ -72,7 +72,7 @@ kml_url = "https://solinfteccombr0.sharepoint.com/:u:/s/ged/EQmWrLecAxZKk8NDqpyk
 
 @st.cache_data
 def carregar_dados():
-    df = pd.read_excel(excel_url, dtype=str)
+    df = pd.read_excel(excel_url, dtype=str, engine='openpyxl')
     df.columns = df.columns.str.strip()
     df['VL_LATITUDE'] = df['VL_LATITUDE'].apply(corrigir_coord)
     df['VL_LONGITUDE'] = df['VL_LONGITUDE'].apply(corrigir_coord)
