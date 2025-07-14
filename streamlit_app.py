@@ -72,7 +72,8 @@ kml_url = "https://solinfteccombr0.sharepoint.com/:u:/s/ged/EQmWrLecAxZKk8NDqpyk
 
 @st.cache_data
 def carregar_dados():
-    df = pd.read_excel(excel_url, dtype=str, engine='openpyxl')
+    response = requests.get(excel_url)
+    df = pd.read_excel(io.BytesIO(response.content), dtype=str, engine='openpyxl')
     df.columns = df.columns.str.strip()
     df['VL_LATITUDE'] = df['VL_LATITUDE'].apply(corrigir_coord)
     df['VL_LONGITUDE'] = df['VL_LONGITUDE'].apply(corrigir_coord)
@@ -87,46 +88,4 @@ opcao = st.sidebar.radio("Visualização:", ["Mapa", "Dashboard"])
 
 if opcao == "Mapa":
     st.subheader("🗺️ Mapa Interativo")
-    m = folium.Map(location=[df_csv['VL_LATITUDE'].mean(), df_csv['VL_LONGITUDE'].mean()], zoom_start=9)
-    cluster = MarkerCluster().add_to(m)
-
-    for _, row in df_csv.iterrows():
-        tipo = str(row.get("DESC_TIPO_EQUIPAMENTO", "")).lower()
-        cor = 'green' if 'pluvi' in tipo else 'blue' if 'estacao' in tipo else 'red'
-        folium.Marker(
-            location=[row['VL_LATITUDE'], row['VL_LONGITUDE']],
-            popup=row.get('FROTA', 'Sem frota'),
-            icon=folium.Icon(color=cor)
-        ).add_to(cluster)
-
-    folium.GeoJson(
-        gdf_kml,
-        tooltip=folium.GeoJsonTooltip(fields=["Name"], aliases=["Fazenda"]),
-        style_function=lambda x: {"color": "#444", "weight": 1, "fillOpacity": 0.05}
-    ).add_to(m)
-
-    st_folium(m, height=600, width=1100)
-
-elif opcao == "Dashboard":
-    st.subheader("📊 Painel de Equipamentos")
-
-    col1, col2 = st.columns(2)
-
-    if 'VL_FIRMWARE_EQUIPAMENTO' in df_csv.columns:
-        firmware = df_csv.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Qtd')
-        fig1 = px.bar(firmware, x='Qtd', y='UNIDADE', color='VL_FIRMWARE_EQUIPAMENTO',
-                      title='Firmwares por Unidade', orientation='h')
-        col1.plotly_chart(fig1, use_container_width=True)
-
-    if 'DESC_TIPO_EQUIPAMENTO' in df_csv.columns:
-        tipos = df_csv[df_csv['DESC_TIPO_EQUIPAMENTO'].str.contains("PLUVI|ESTACAO", na=False, case=False)]
-        tipos = tipos.groupby(['UNIDADE', 'DESC_TIPO_EQUIPAMENTO']).size().reset_index(name='Qtd')
-        fig2 = px.bar(tipos, x='UNIDADE', y='Qtd', color='DESC_TIPO_EQUIPAMENTO',
-                      title='Equipamentos por Tipo')
-        col2.plotly_chart(fig2, use_container_width=True)
-
-    if 'D_MOVEIS_AT' in df_csv.columns:
-        dist = df_csv['D_MOVEIS_AT'].value_counts()
-        fig3 = px.pie(values=dist.values, names=dist.index, hole=0.5,
-                      title='Equipamentos com Dados Móveis')
-        st.plotly_chart(fig3, use_container_width=True)
+    m = folium.Map(location=[df_csv['
