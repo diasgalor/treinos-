@@ -8,7 +8,6 @@ from streamlit_folium import st_folium
 import plotly.express as px
 from shapely.geometry import Polygon, Point
 import xml.etree.ElementTree as ET
-import requests
 import io
 from unidecode import unidecode
 import numpy as np
@@ -57,10 +56,9 @@ def corrigir_coord(valor):
     except:
         return None
 
-def extrair_kml(url):
+def extrair_kml(file_content):
     try:
-        r = requests.get(url)
-        tree = ET.fromstring(r.content)
+        tree = ET.fromstring(file_content)
         ns = {'kml': 'http://www.opengis.net/kml/2.2'}
         dados = []
         for placemark in tree.findall('.//kml:Placemark', ns):
@@ -73,33 +71,53 @@ def extrair_kml(url):
                 coords = [tuple(map(float, c.split(',')[:2])) for c in coords_text.split()]
                 geometry = Polygon(coords)
                 dados.append({**props, 'geometry': geometry})
-        return gpd.GeoDataFrame(dados, crs="EPSG:4326")
+        gdf = gpd.GeoDataFrame(dados, crs="EPSG:4326")
+        if gdf.empty:
+            st.warning("Nenhum dado válido encontrado no KML.")
+        return gdf
     except Exception as e:
         st.error(f"Erro ao processar KML: {e}")
         return gpd.GeoDataFrame(columns=['Name', 'geometry'])
 
-# --- LEITURA DE DADOS ---
-excel_url = "https://solinfteccombr0.sharepoint.com/:x:/s/ged/Ee54FYVqqh9Hh3zUEuGJJOsBcAAAsZne4aXjTe6sAyQJvA?download=1"
-kml_url = "https://solinfteccombr0.sharepoint.com/:u:/s/ged/EQmWrLecAxZKk8NDqpykPaUBG9v7VE1LqL5e9AtW_zbMgg?download=1"
+# --- UPLOAD DE ARQUIVOS ---
+st.sidebar.header("Upload de Arquivos")
+excel_file = st.sidebar.file_uploader("Carregar consolidada.xlsx", type=["xlsx"])
+kml_file = st.sidebar.file_uploader("Carregar slc_mapa.kml", type=["kml"], accept_multiple_files=False)
 
 @st.cache_data
-def carregar_dados():
+def carregar_dados(excel_file, kml_file):
     try:
-        response = requests.get(excel_url)
-        df = pd.read_excel(io.BytesIO(response.content), dtype=str, engine='openpyxl')
+        # Carregar Excel
+        if excel_file is None:
+            st.error("Por favor, carregue o arquivo consolidada.xlsx.")
+            return None, None
+        try:
+            df = pd.read_excel(excel_file, dtype=str, engine='openpyxl')
+        except Exception as e:
+            st.error(f"Erro ao ler o arquivo Excel: {e}. Verifique se é um .xlsx válido.")
+            return None, None
         df.columns = df.columns.str.strip()
         df['VL_LATITUDE'] = df['VL_LATITUDE'].apply(corrigir_coord)
         df['VL_LONGITUDE'] = df['VL_LONGITUDE'].apply(corrigir_coord)
         df['UNIDADE'] = df['UNIDADE'].apply(formatar_nome)
-        gdf = extrair_kml(kml_url)
+
+        # Carregar KML
+        gdf = None
+        if kml_file is not None:
+            kml_content = kml_file.read()
+            gdf = extrair_kml(kml_content)
+        else:
+            st.warning("Arquivo KML não carregado. O mapa de limites não será exibido.")
+
         return df.dropna(subset=['VL_LATITUDE', 'VL_LONGITUDE']), gdf
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        st.error(f"Erro geral ao carregar dados: {e}")
         return None, None
 
-df_csv, gdf_kml = carregar_dados()
+# Carregar dados
+df_csv, gdf_kml = carregar_dados(excel_file, kml_file)
 
-if df_csv is None or gdf_kml is None:
+if df_csv is None:
     st.stop()
 
 # Validação de colunas
@@ -145,19 +163,20 @@ if opcao == "Mapa":
             ).add_to(marker_cluster)
 
         # Limites KML
-        if "Name" in gdf_kml.columns:
-            folium.GeoJson(
-                gdf_kml,
-                name="Limites",
-                tooltip=folium.GeoJsonTooltip(fields=["Name"], aliases=["Fazenda:"]),
-                style_function=lambda x: {"fillColor": "blue", "color": "blue", "weight": 1, "fillOpacity": 0.1}
-            ).add_to(mapa)
-        else:
-            folium.GeoJson(
-                gdf_kml,
-                name="Limites",
-                style_function=lambda x: {"fillColor": "blue", "color": "blue", "weight": 1, "fillOpacity": 0.1}
-            ).add_to(mapa)
+        if gdf_kml is not None and not gdf_kml.empty:
+            if "Name" in gdf_kml.columns:
+                folium.GeoJson(
+                    gdf_kml,
+                    name="Limites",
+                    tooltip=folium.GeoJsonTooltip(fields=["Name"], aliases=["Fazenda:"]),
+                    style_function=lambda x: {"fillColor": "blue", "color": "blue", "weight": 1, "fillOpacity": 0.1}
+                ).add_to(mapa)
+            else:
+                folium.GeoJson(
+                    gdf_kml,
+                    name="Limites",
+                    style_function=lambda x: {"fillColor": "blue", "color": "blue", "weight": 1, "fillOpacity": 0.1}
+                ).add_to(mapa)
 
         folium.LayerControl().add_to(mapa)
         st_folium(mapa, width=1200, height=600)
@@ -169,32 +188,35 @@ elif opcao == "Dashboard":
     st.subheader("📊 Dashboard")
     
     # Gráfico 1: Firmwares por Unidade
-    df_firmware_fazenda = df_csv.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
-    df_firmware_fazenda = df_firmware_fazenda.sort_values(by='Quantidade', ascending=True)
-    fig1 = px.bar(
-        df_firmware_fazenda,
-        x='Quantidade',
-        y='UNIDADE',
-        color='VL_FIRMWARE_EQUIPAMENTO',
-        title='<b>Distribuição de Firmwares por Unidade</b>',
-        labels={'VL_FIRMWARE_EQUIPAMENTO': 'Versão do Firmware', 'UNIDADE': 'Unidade', 'Quantidade': 'Qtd. de Equipamentos'},
-        orientation='h',
-        text='Quantidade',
-        color_discrete_sequence=px.colors.qualitative.Dark2
-    )
-    fig1.update_layout(
-        title_font_size=20,
-        title_font_family='Arial',
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(250,250,250,1)',
-        bargap=0.25,
-        height=600,
-        xaxis=dict(title='Quantidade de Equipamentos'),
-        yaxis=dict(title=''),
-        legend_title='Versão do Firmware'
-    )
-    fig1.update_traces(textposition='outside', textfont=dict(size=12, color='black'))
-    st.plotly_chart(fig1, use_container_width=True)
+    if 'VL_FIRMWARE_EQUIPAMENTO' in df_csv.columns:
+        df_firmware_fazenda = df_csv.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
+        df_firmware_fazenda = df_firmware_fazenda.sort_values(by='Quantidade', ascending=True)
+        fig1 = px.bar(
+            df_firmware_fazenda,
+            x='Quantidade',
+            y='UNIDADE',
+            color='VL_FIRMWARE_EQUIPAMENTO',
+            title='<b>Distribuição de Firmwares por Unidade</b>',
+            labels={'VL_FIRMWARE_EQUIPAMENTO': 'Versão do Firmware', 'UNIDADE': 'Unidade', 'Quantidade': 'Qtd. de Equipamentos'},
+            orientation='h',
+            text='Quantidade',
+            color_discrete_sequence=px.colors.qualitative.Dark2
+        )
+        fig1.update_layout(
+            title_font_size=20,
+            title_font_family='Arial',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(250,250,250,1)',
+            bargap=0.25,
+            height=600,
+            xaxis=dict(title='Quantidade de Equipamentos'),
+            yaxis=dict(title=''),
+            legend_title='Versão do Firmware'
+        )
+        fig1.update_traces(textposition='outside', textfont=dict(size=12, color='black'))
+        st.plotly_chart(fig1, use_container_width=True)
+    else:
+        st.warning("Coluna 'VL_FIRMWARE_EQUIPAMENTO' não encontrada. Gráfico de firmwares não exibido.")
 
     # Gráfico 2: Pluviômetros e Estações por Unidade
     df_contagem_1 = df_csv[
@@ -288,7 +310,7 @@ elif opcao == "Interpolação Sinal":
         if df_fazenda.empty:
             st.warning("Nenhuma estação encontrada para a fazenda selecionada.")
         else:
-            geom_df = gdf_kml[gdf_kml['Name'].apply(formatar_nome) == nome_formatado]
+            geom_df = gdf_kml[gdf_kml['Name'].apply(formatar_nome) == nome_formatado] if gdf_kml is not None else gpd.GeoDataFrame()
             fazenda_geom = geom_df.unary_union if not geom_df.empty else None
             df_fazenda['DBM'] = pd.to_numeric(df_fazenda.get('DBM', pd.Series()), errors='coerce')
             if 'DBM' in df_fazenda.columns and not df_fazenda['DBM'].dropna().empty:
