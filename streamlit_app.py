@@ -11,8 +11,9 @@ from scipy.spatial.distance import cdist
 from unidecode import unidecode
 import xml.etree.ElementTree as ET
 import gc
-from streamlit_folium import st_folium
 import re
+import tempfile
+import streamlit.components.v1 as components
 
 # Configuração para layout responsivo
 st.set_page_config(page_title="Mapa de Equipamentos Climáticos", layout="wide", initial_sidebar_state="collapsed")
@@ -80,8 +81,8 @@ def classificar_dbm(valor):
         return 1  # ruim
 
 def interpolacao_idw(df, x_col='VL_LONGITUDE', y_col='VL_LATITUDE', val_col='DBM', resolution=0.002, buffer=0.05, geom_mask=None):
-    df = df.dropna(subset=[val_col]).copy()
-    if df.empty:
+    df = df.dropna(subset=[x_col, y_col, val_col]).copy()
+    if df.empty or len(df) < 3:  # Mínimo de 3 pontos para interpolação
         return None, None, None, None
 
     if df[val_col].dropna().between(1, 4).all():
@@ -89,8 +90,14 @@ def interpolacao_idw(df, x_col='VL_LONGITUDE', y_col='VL_LATITUDE', val_col='DBM
     else:
         df['class_num'] = df[val_col].apply(classificar_dbm)
 
+    if df['class_num'].isna().all():
+        return None, None, None, None
+
     minx, miny = df[x_col].min() - buffer, df[y_col].min() - buffer
     maxx, maxy = df[x_col].max() + buffer, df[y_col].max() + buffer
+    if not all(np.isfinite([minx, miny, maxx, maxy])):
+        return None, None, None, None
+
     x_grid = np.arange(minx, maxx, resolution)
     y_grid = np.arange(miny, maxy, resolution)
 
@@ -104,11 +111,13 @@ def interpolacao_idw(df, x_col='VL_LONGITUDE', y_col='VL_LATITUDE', val_col='DBM
     valores = df['class_num'].values
 
     distances = cdist(grid_points, pontos)
-    epsilon = 1e-9
+    epsilon = 1e-6  # Aumentado para evitar divisão por zero
     weights = 1 / (distances ** 2 + epsilon)
     denom = weights.sum(axis=1)
+    if not np.all(denom > 0):
+        return None, None, None, None
     numer = (weights * valores).sum(axis=1)
-    interpolated = np.clip(np.round(interpolated := numer / denom), 1, 4)
+    interpolated = np.clip(np.round(numer / denom), 1, 4)
 
     if geom_mask is not None:
         pontos_geom = [Point(xy) for xy in grid_points]
@@ -178,11 +187,13 @@ if csv_file and kml_file:
 
     elif aba == 'Mapa':
         st.markdown("<h2 class='text-xl font-medium mb-3'>Mapa Interativo</h2>", unsafe_allow_html=True)
-        if not df_csv.empty:
+        if not df_csv.empty and not df_csv[['VL_LATITUDE', 'VL_LONGITUDE']].isna().any().any():
             mapa = folium.Map(location=[df_csv['VL_LATITUDE'].mean(), df_csv['VL_LONGITUDE'].mean()], zoom_start=10, tiles="CartoDB Positron")
             cluster = MarkerCluster().add_to(mapa)
 
             for _, row in df_csv.iterrows():
+                if pd.isna(row['VL_LATITUDE']) or pd.isna(row['VL_LONGITUDE']):
+                    continue
                 tipo = str(row['DESC_TIPO_EQUIPAMENTO']).lower()
                 cor = 'green' if 'pluviometro' in tipo else 'blue' if 'estacao' in tipo else 'red'
                 folium.Marker(
@@ -198,7 +209,10 @@ if csv_file and kml_file:
                 style_function=lambda x: {"fillColor": "blue", "color": "blue", "weight": 1, "fillOpacity": 0.1}
             ).add_to(mapa)
             folium.LayerControl().add_to(mapa)
-            st_folium(mapa, width=None, height=400)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp:
+                mapa.save(tmp.name)
+                with open(tmp.name, 'r') as f:
+                    components.html(f.read(), height=400)
         else:
             st.warning("Nenhum dado de coordenadas válido para exibir o mapa.")
 
@@ -210,7 +224,7 @@ if csv_file and kml_file:
         df_csv['UNIDADE_Padronizada'] = df_csv['UNIDADE'].apply(formatar_nome)
         gdf_kml['NomeFazendaKML_Padronizada'] = gdf_kml['NomeFazendaKML'].apply(formatar_nome)
         df_faz = df_csv[df_csv['UNIDADE_Padronizada'] == formatar_nome(escolha)].copy()
-        geom = gdf_kml[gdf_kml['NomeFazendaKML_Padronizada'] == formatar_nome(escolha)].geometry.unary_union
+        geom = gdf_kml[gdf_kml['NomeFazendaKML_Padronizada'] == formatar_nome(escolha)].geometry.union_all()
 
         if not df_faz.empty and geom is not None:
             df_faz['DBM'] = pd.to_numeric(df_faz['DBM'], errors='coerce')
@@ -240,6 +254,8 @@ if csv_file and kml_file:
                     im = ax.imshow(grid_numerico, extent=bounds, origin='lower', cmap=cmap, interpolation='nearest', alpha=0.8)
                     gpd.GeoSeries(geom).boundary.plot(ax=ax, color='black', linewidth=1.5)
                     for _, row in df_faz.iterrows():
+                        if pd.isna(row['VL_LONGITUDE']) or pd.isna(row['VL_LATITUDE']):
+                            continue
                         tipo = str(row['DESC_TIPO_EQUIPAMENTO']).lower()
                         cor = 'blue' if 'pluviometro' in tipo else 'purple' if 'estacao' in tipo else 'red'
                         ax.scatter(row['VL_LONGITUDE'], row['VL_LATITUDE'], c=cor, s=50, edgecolor='k', linewidth=0.5, label=tipo if tipo not in ax.get_legend_handles_labels()[1] else "")
@@ -255,7 +271,7 @@ if csv_file and kml_file:
                     plt.close(fig)
                     gc.collect()
                 else:
-                    st.warning(f"Falha na interpolação para a fazenda '{escolha}'.")
+                    st.warning(f"Falha na interpolação para a fazenda '{escolha}'. Verifique se há dados válidos suficientes.")
         else:
             st.warning(f"Nenhum dado ou geometria válida para a fazenda '{escolha}'.")
 else:
