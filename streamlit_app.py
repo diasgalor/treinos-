@@ -105,56 +105,34 @@ def interpolacao_idw(df, x_col='VL_LONGITUDE', y_col='VL_LATITUDE', val_col='DBM
         st.warning("Grade muito grande. Ajuste a resolução ou buffer.")
         return None, None, None, None
 
-        if aba == 'Dashboard':
-        st.markdown("<h2 class='text-xl font-medium mb-3'>Gráficos Interativos</h2>", unsafe_allow_html=True)
-        col1, col2 = st.columns([1, 1], gap="small")
+    grid_x, grid_y = np.meshgrid(x_grid, y_grid)
+    grid_points = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+    pontos = df[[x_col, y_col]].values
+    valores = df['class_num'].values
 
-        with col1:
-            # Contagem direta de firmwares por unidade sem agregação implícita
-            df_firmware = df_csv.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
-            fig1 = px.bar(df_firmware, x='UNIDADE', y='Quantidade', color='VL_FIRMWARE_EQUIPAMENTO',
-                          title='Firmwares por Unidade', height=300, color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig1.update_layout(
-                margin=dict(l=20, r=20, t=50, b=20),
-                legend_title="Firmware",
-                font=dict(size=10),
-                xaxis_title="Unidade",
-                yaxis_title="Quantidade",
-                xaxis={'tickangle': 45, 'tickfont': dict(size=8)}  # Ajuste de ângulo para evitar sobreposição
-            )
-            fig1.update_traces(textposition='auto', textfont=dict(size=8))  # Posicionamento automático de texto
-            st.plotly_chart(fig1, use_container_width=True)
+    distances = cdist(grid_points, pontos)
+    epsilon = 1e-6  # Aumentado para evitar divisão por zero
+    weights = 1 / (distances ** 2 + epsilon)
+    denom = weights.sum(axis=1)
+    if not np.all(denom > 0):
+        return None, None, None, None
+    numer = (weights * valores).sum(axis=1)
+    interpolated = np.clip(np.round(numer / denom), 1, 4)
 
-        with col2:
-            # Contagem exata de equipamentos por unidade e tipo
-            df_tipo = df_csv[df_csv["DESC_TIPO_EQUIPAMENTO"].str.contains("ESTACAO|PLUVIOMETRO", na=False, case=False)]
-            df_tipo = df_tipo.groupby(['UNIDADE', 'DESC_TIPO_EQUIPAMENTO']).size().reset_index(name='Quantidade')
-            fig2 = px.bar(df_tipo, x='UNIDADE', y='Quantidade', color='DESC_TIPO_EQUIPAMENTO', barmode='stack',
-                          title='Equipamentos por Unidade', height=300, color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig2.update_layout(
-                margin=dict(l=20, r=20, t=50, b=20),
-                legend_title="Tipo",
-                font=dict(size=10),
-                xaxis_title="Unidade",
-                yaxis_title="Quantidade",
-                xaxis={'tickangle': 45, 'tickfont': dict(size=8)}  # Ajuste de ângulo
-            )
-            fig2.update_traces(textposition='auto', textfont=dict(size=8))  # Posicionamento automático
-            st.plotly_chart(fig2, use_container_width=True)
+    if geom_mask is not None:
+        pontos_geom = [Point(xy) for xy in grid_points]
+        mask = np.array([geom_mask.contains(pt) for pt in pontos_geom])
+        interpolated[~mask] = np.nan
 
-        if 'D_MOVEIS_AT' in df_csv.columns:
-            contagem = df_csv['D_MOVEIS_AT'].value_counts()
-            fig3 = px.pie(values=contagem.values, names=contagem.index, hole=0.5,
-                          title='Equipamentos com Dados Móveis', height=300,
-                          color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig3.update_traces(textinfo='percent+label', textfont_size=10, textposition='inside')  # Rótulos dentro do gráfico
-            fig3.update_layout(
-                margin=dict(l=20, r=20, t=50, b=20),
-                legend_title="Dados Móveis",
-                font=dict(size=10),
-                showlegend=True
-            )
-            st.plotly_chart(fig3, use_container_width=True)
+    grid_numerico = interpolated.reshape(grid_x.shape)
+    del distances, weights, interpolated
+    gc.collect()
+    return grid_x, grid_y, grid_numerico, (minx, maxx, miny, maxy)
+
+# Upload de arquivos
+st.sidebar.header("Upload de Arquivos")
+csv_file = st.sidebar.file_uploader("CSV dos Equipamentos", type="csv")
+kml_file = st.sidebar.file_uploader("KML com Limites das Fazendas", type="kml")
 
 if csv_file and kml_file:
     # Leitura e pré-processamento
@@ -184,10 +162,17 @@ if csv_file and kml_file:
 
         with col1:
             df_firmware = df_csv.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
-            fig1 = px.bar(df_firmware, x='Quantidade', y='UNIDADE', color='VL_FIRMWARE_EQUIPAMENTO', orientation='h',
+            fig1 = px.bar(df_firmware, x='UNIDADE', y='Quantidade', color='VL_FIRMWARE_EQUIPAMENTO',
                           title='Firmwares por Unidade', height=300, color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig1.update_layout(margin=dict(l=20, r=20, t=50, b=20), legend_title="Firmware", font=dict(size=10))
-            fig1.update_traces(textposition='outside', textfont=dict(size=8))
+            fig1.update_layout(
+                margin=dict(l=20, r=20, t=50, b=20),
+                legend_title="Firmware",
+                font=dict(size=10),
+                xaxis_title="Unidade",
+                yaxis_title="Quantidade",
+                xaxis={'tickangle': 45, 'tickfont': dict(size=8)}  # Ajuste de ângulo para evitar sobreposição
+            )
+            fig1.update_traces(textposition='auto', textfont=dict(size=8))  # Posicionamento automático de texto
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
@@ -195,16 +180,29 @@ if csv_file and kml_file:
             df_tipo = df_tipo.groupby(['UNIDADE', 'DESC_TIPO_EQUIPAMENTO']).size().reset_index(name='Quantidade')
             fig2 = px.bar(df_tipo, x='UNIDADE', y='Quantidade', color='DESC_TIPO_EQUIPAMENTO', barmode='stack',
                           title='Equipamentos por Unidade', height=300, color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig2.update_layout(margin=dict(l=20, r=20, t=50, b=20), legend_title="Tipo", font=dict(size=10))
-            fig2.update_traces(textposition='outside', textfont=dict(size=8))
+            fig2.update_layout(
+                margin=dict(l=20, r=20, t=50, b=20),
+                legend_title="Tipo",
+                font=dict(size=10),
+                xaxis_title="Unidade",
+                yaxis_title="Quantidade",
+                xaxis={'tickangle': 45, 'tickfont': dict(size=8)}  # Ajuste de ângulo
+            )
+            fig2.update_traces(textposition='auto', textfont=dict(size=8))  # Posicionamento automático
             st.plotly_chart(fig2, use_container_width=True)
 
         if 'D_MOVEIS_AT' in df_csv.columns:
             contagem = df_csv['D_MOVEIS_AT'].value_counts()
-            fig3 = px.pie(values=contagem.values, names=contagem.index, hole=0.5, title='Equipamentos com Dados Móveis',
-                          height=300, color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig3.update_traces(textinfo='percent+label', textfont_size=10)
-            fig3.update_layout(margin=dict(l=20, r=20, t=50, b=20), legend_title="Dados Móveis", font=dict(size=10))
+            fig3 = px.pie(values=contagem.values, names=contagem.index, hole=0.5,
+                          title='Equipamentos com Dados Móveis', height=300,
+                          color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig3.update_traces(textinfo='percent+label', textfont_size=10, textposition='inside')  # Rótulos dentro do gráfico
+            fig3.update_layout(
+                margin=dict(l=20, r=20, t=50, b=20),
+                legend_title="Dados Móveis",
+                font=dict(size=10),
+                showlegend=True
+            )
             st.plotly_chart(fig3, use_container_width=True)
 
     elif aba == 'Mapa':
