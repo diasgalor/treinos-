@@ -4,20 +4,21 @@ import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
+import plotly.graph_objects as go
 import plotly.express as px
 import xml.etree.ElementTree as ET
 from shapely.geometry import Polygon, Point
 from unidecode import unidecode
-import io
 import numpy as np
+import matplotlib.pyplot as plt
 
-# --- ESTILO MOBILE APPLE-INSPIRED ---
+# --- ESTILO MOBILE STRAVA-INSPIRED ---
 st.set_page_config(page_title="SLC Mobile", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #f5f5f7; color: #222;}
-.stButton>button { background: linear-gradient(90deg, #007aff 70%, #34c759 100%); color:white; border-radius:18px; border:none; padding:14px 0; font-size:18px; width:100%; margin-top:8px; box-shadow:0 2px 16px rgba(0,0,0,0.08);}
-.stButton>button:hover { background: #005bb5; }
+.stButton>button { background: linear-gradient(90deg, #FC4C02 70%, #34c759 100%); color:white; border-radius:18px; border:none; padding:14px 0; font-size:18px; width:100%; margin-top:8px; box-shadow:0 2px 16px rgba(0,0,0,0.08);}
+.stButton>button:hover { background: #FC4C02; }
 .stSelectbox, .stFileUploader { margin-bottom:1rem; border-radius:14px !important; border:1px solid #e5e5ea !important; box-shadow:0 1px 8px rgba(0,0,0,0.04);}
 @media (max-width: 600px) {
     h1 { font-size:1.2rem; }
@@ -27,7 +28,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌱 Monitoramento Climático SLC Mobile")
+st.title("🌱 Monitoramento Climático SLC (Strava Style)")
 
 # ----- UTILS -----
 def formatar_nome(nome):
@@ -89,10 +90,10 @@ def interpolacao_idw(df, x_col='VL_LONGITUDE', y_col='VL_LATITUDE', val_col='DBM
     grid_x, grid_y = np.meshgrid(x_grid, y_grid)
     grid_points = np.column_stack((grid_x.ravel(), grid_y.ravel()))
 
+    from scipy.spatial.distance import cdist
     pontos = df[[x_col, y_col]].values
     valores = df['class_num'].values
 
-    from scipy.spatial.distance import cdist
     distances = cdist(grid_points, pontos)
     epsilon = 1e-9
     weights = 1 / (distances**2 + epsilon)
@@ -133,67 +134,113 @@ if df is not None:
 tabs = st.tabs(["📊 Gráficos", "🗺️ Mapa Interativo", "🎯 Interpolação IDW"])
 
 with tabs[0]:
-    st.subheader("🔢 Distribuição de Firmwares por Unidade")
-    if df is not None and "VL_FIRMWARE_EQUIPAMENTO" in df.columns and "UNIDADE" in df.columns:
-        df_firmware = df.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
-        fig = px.bar(
-            df_firmware, x='Quantidade', y='UNIDADE', color='VL_FIRMWARE_EQUIPAMENTO',
-            orientation='h', text='Quantidade',
-            color_discrete_sequence=['#007aff', '#34c759', '#e5e5ea', '#1d1d1f'],
-            title='Distribuição de Firmwares por Unidade'
-        )
+    # --- Strava-style: Gráfico de Linha com Área (Temperatura) ---
+    if df is not None and "Temperatura" in df.columns and "Data" in df.columns:
+        st.subheader("🌡️ Temperatura (Strava Style)")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df["Data"], y=df["Temperatura"],
+            mode="lines",
+            line=dict(width=5, color="#FC4C02"),
+            fill="tozeroy",
+            fillcolor="rgba(252,76,2,0.18)",
+            hoverinfo="x+y",
+            name="Temperatura"
+        ))
         fig.update_layout(
-            font=dict(family='-apple-system', size=15),
-            plot_bgcolor='#f5f5f7', paper_bgcolor='#f5f5f7',
-            bargap=0.25, height=340, margin=dict(l=16, r=16, t=40, b=20),
-            legend_title='Firmware'
+            margin=dict(l=10, r=10, t=25, b=10),
+            height=220,
+            plot_bgcolor="#fff",
+            paper_bgcolor="#fff",
+            font=dict(size=18),
+            showlegend=False,
+            xaxis=dict(showgrid=False, showticklabels=True, tickfont=dict(size=14), ticks="outside"),
+            yaxis=dict(showgrid=False, showticklabels=True, tickfont=dict(size=14), ticks="outside"),
         )
-        fig.update_traces(textposition='outside', marker=dict(line=dict(color='#e5e5ea', width=2)), textfont=dict(size=13, color='#222'))
+        fig.update_xaxes(rangeslider_visible=False)
+        fig.update_yaxes(rangemode="tozero")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("🌦️ Pluviômetros e Estações por Unidade")
-    if df is not None and "DESC_TIPO_EQUIPAMENTO" in df.columns:
-        df_contagem_1 = df[df["DESC_TIPO_EQUIPAMENTO"].str.contains("ESTACAO|PLUVIOMETRO", case=False, na=False)]
-        df_contagem_1 = df_contagem_1.groupby(['UNIDADE', 'DESC_TIPO_EQUIPAMENTO']).size().reset_index(name='Quantidade')
-        fig1 = px.bar(
-            df_contagem_1, x='UNIDADE', y='Quantidade', color='DESC_TIPO_EQUIPAMENTO',
-            text='Quantidade', barmode='stack',
-            color_discrete_sequence=['#007aff', '#34c759', '#8E44AD'],
-            title='Pluviômetros e Estações por Unidade'
+    # --- Strava-style: Gráfico de Barras ---
+    if df is not None and "VL_FIRMWARE_EQUIPAMENTO" in df.columns and "UNIDADE" in df.columns:
+        st.subheader("🔢 Distribuição de Firmwares por Unidade (Strava Style)")
+        df_firmware = df.groupby(['VL_FIRMWARE_EQUIPAMENTO', 'UNIDADE']).size().reset_index(name='Quantidade')
+        fig = go.Figure()
+        for fw in df_firmware["VL_FIRMWARE_EQUIPAMENTO"].unique():
+            df_fw = df_firmware[df_firmware["VL_FIRMWARE_EQUIPAMENTO"] == fw]
+            fig.add_trace(go.Bar(
+                x=df_fw["UNIDADE"], y=df_fw["Quantidade"],
+                name=str(fw),
+                marker=dict(color="#FC4C02", line=dict(color="#fff", width=0)),
+                width=0.55,
+                text=df_fw["Quantidade"], textposition="outside",
+                hoverinfo="x+y",
+            ))
+        fig.update_layout(
+            barmode="stack",
+            height=220,
+            plot_bgcolor="#fff",
+            paper_bgcolor="#fff",
+            margin=dict(l=10, r=10, t=25, b=10),
+            font=dict(size=18),
+            showlegend=True,
+            xaxis=dict(tickfont=dict(size=14)),
+            yaxis=dict(tickfont=dict(size=14), rangemode="tozero"),
+            legend_title="Firmware"
         )
-        fig1.update_layout(
-            height=340, legend_title='Tipo de Equipamento', plot_bgcolor='#f5f5f7', paper_bgcolor='#f5f5f7'
-        )
-        fig1.update_traces(textposition='outside')
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📶 Tipos de Comunicação por Unidade (Sem 4G)")
-    if df is not None and "TIPO_COMUNICACAO" in df.columns:
-        df_contagem_2 = df[df['TIPO_COMUNICACAO'] != '4G'].groupby(['UNIDADE', 'TIPO_COMUNICACAO']).size().reset_index(name='Quantidade')
-        fig2 = px.bar(
-            df_contagem_2, x='UNIDADE', y='Quantidade', color='TIPO_COMUNICACAO',
-            text='Quantidade', barmode='stack',
-            color_discrete_sequence=['#2E86C1', '#28B463', '#8E44AD'],
-            title='Tipos de Comunicação por Unidade'
-        )
-        fig2.update_layout(
-            height=340, legend_title='Tipo de Comunicação', plot_bgcolor='#f5f5f7', paper_bgcolor='#f5f5f7'
-        )
-        fig2.update_traces(textposition='outside')
-        st.plotly_chart(fig2, use_container_width=True)
-
-    st.subheader("📡 Percentual de Equipamentos com Dados Móveis")
+    # --- Strava-style: Gráfico de Rosca/Dados Móveis ---
     if df is not None and "D_MOVEIS_AT" in df.columns:
+        st.subheader("📡 Percentual de Equipamentos com Dados Móveis (Strava Style)")
         contagem_moveis = df['D_MOVEIS_AT'].value_counts()
-        fig3 = px.pie(
-            values=contagem_moveis.values, names=contagem_moveis.index,
-            title='Dados Móveis', hole=0.5,
-            color_discrete_sequence=['#007aff', '#34c759', '#e5e5ea']
+        fig3 = go.Figure(go.Pie(
+            values=contagem_moveis.values,
+            labels=contagem_moveis.index,
+            hole=0.55,
+            marker=dict(colors=["#FC4C02", "#34c759", "#e5e5ea"]),
+            textinfo='percent+label',
+            textfont_size=17
+        ))
+        fig3.update_layout(
+            showlegend=True,
+            legend_title='Dados Móveis',
+            font=dict(size=16),
+            margin=dict(l=10, r=10, t=30, b=10),
+            height=220,
+            plot_bgcolor="#fff",
+            paper_bgcolor="#fff"
         )
-        fig3.update_traces(textinfo='percent+label', textfont_size=15, marker=dict(line=dict(color='#e5e5ea', width=2)))
-        fig3.update_layout(showlegend=True, legend_title='Dados Móveis', font=dict(family='-apple-system', size=14),
-                        plot_bgcolor='#f5f5f7', paper_bgcolor='#f5f5f7', margin=dict(l=10, r=10, t=30, b=10), height=280)
         st.plotly_chart(fig3, use_container_width=True)
+
+    # --- Strava-style: Gráfico de Barras por Tipo de Comunicação ---
+    if df is not None and "TIPO_COMUNICACAO" in df.columns:
+        st.subheader("📶 Tipos de Comunicação por Unidade (Strava Style)")
+        df_contagem_2 = df[df['TIPO_COMUNICACAO'] != '4G'].groupby(['UNIDADE', 'TIPO_COMUNICACAO']).size().reset_index(name='Quantidade')
+        fig2 = go.Figure()
+        for tipo in df_contagem_2["TIPO_COMUNICACAO"].unique():
+            df_tipo = df_contagem_2[df_contagem_2["TIPO_COMUNICACAO"] == tipo]
+            fig2.add_trace(go.Bar(
+                x=df_tipo["UNIDADE"], y=df_tipo["Quantidade"],
+                name=str(tipo),
+                marker=dict(color="#34c759", line=dict(color="#fff", width=0)),
+                width=0.55,
+                text=df_tipo["Quantidade"], textposition="outside",
+                hoverinfo="x+y",
+            ))
+        fig2.update_layout(
+            barmode="stack",
+            height=220,
+            plot_bgcolor="#fff",
+            paper_bgcolor="#fff",
+            margin=dict(l=10, r=10, t=25, b=10),
+            font=dict(size=18),
+            showlegend=True,
+            xaxis=dict(tickfont=dict(size=14)),
+            yaxis=dict(tickfont=dict(size=14), rangemode="tozero"),
+            legend_title="Tipo"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
 with tabs[1]:
     st.subheader("🗺️ Mapa de Equipamentos e Limites")
@@ -229,7 +276,7 @@ with tabs[1]:
                 gdf_kml,
                 name="Limites",
                 tooltip=folium.GeoJsonTooltip(fields=["Name"], aliases=["Fazenda:"]),
-                style_function=lambda x: {"fillColor": "#007aff40", "color": "#007aff", "weight": 2, "fillOpacity": 0.19}
+                style_function=lambda x: {"fillColor": "#FC4C0220", "color": "#FC4C02", "weight": 2, "fillOpacity": 0.19}
             ).add_to(mapa)
         folium.LayerControl().add_to(mapa)
         st_folium(mapa, width=370, height=430)
@@ -261,7 +308,6 @@ with tabs[2]:
             )
 
             minx, maxx, miny, maxy = bounds
-            import matplotlib.pyplot as plt
             from matplotlib.colors import ListedColormap
 
             colors = {
@@ -280,9 +326,9 @@ with tabs[2]:
                         interpolation='nearest',
                         alpha=0.8)
             if fazenda_mask is not None and not getattr(fazenda_mask, "is_empty", False):
-                gpd.GeoDataFrame(geometry=[fazenda_mask]).boundary.plot(ax=ax, color='black', linewidth=2)
+                gpd.GeoDataFrame(geometry=[fazenda_mask]).boundary.plot(ax=ax, color='#FC4C02', linewidth=2)
             # Add points
-            ax.scatter(df_fazenda["VL_LONGITUDE"], df_fazenda["VL_LATITUDE"], c="black", s=55, edgecolors='w')
+            ax.scatter(df_fazenda["VL_LONGITUDE"], df_fazenda["VL_LATITUDE"], c="#FC4C02", s=55, edgecolors='w')
             ax.set_xlim(minx, maxx)
             ax.set_ylim(miny, maxy)
             ax.set_xlabel("Longitude")
@@ -301,6 +347,6 @@ with tabs[2]:
 # ----- RODAPÉ -----
 st.markdown("""
 <div style='text-align:center; color:#aaa; font-size:15px; margin-top:22px'>
-Feito para SLC | <span style="font-weight:600;">Design mobile inspirado em iOS</span>
+Feito para SLC | <span style="font-weight:600;">Design mobile inspirado no Strava/iOS</span>
 </div>
 """, unsafe_allow_html=True)
