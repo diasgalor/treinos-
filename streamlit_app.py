@@ -68,7 +68,7 @@ def extrair_metadados_kml(content):
     return pd.DataFrame(dados)
 
 def classificar_dbm(valor):
-    if pd soles.isna(valor):
+    if pd.isna(valor):
         return np.nan
     elif valor > -70:
         return 4  # ótimo
