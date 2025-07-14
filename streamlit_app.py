@@ -1,3 +1,4 @@
+# streamlit_app.py
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
@@ -93,28 +94,31 @@ if df is not None:
 if gdf is not None and not gdf.empty:
     st.subheader("Mapa das Áreas")
     map_center = gdf.geometry.centroid.iloc[0].xy if not gdf.empty else (-49, -15)
+    # Substituição de st.experimental_get_query_params por st.query_params
+    is_mobile = "mobile" in st.query_params
     m = folium.Map(
         location=[map_center[1][0], map_center[0][0]],
         zoom_start=10,
-        width='100%', height=350 if st.experimental_get_query_params().get("mobile") else 500
+        width='100%', height=350 if is_mobile else 500
     )
     for _, row in gdf.iterrows():
         folium.GeoJson(row['geometry'], name=row['Name']).add_to(m)
         folium.Marker([row['geometry'].centroid.y, row['geometry'].centroid.x], 
                       popup=row['Name'],
                       icon=folium.Icon(color='green', icon='leaf', prefix='fa')).add_to(m)
-    st_folium(m, width=350 if st.experimental_get_query_params().get("mobile") else 700, height=350 if st.experimental_get_query_params().get("mobile") else 500)
+    st_folium(m, width=350 if is_mobile else 700, height=350 if is_mobile else 500)
 
 # --- GRÁFICO AJUSTÁVEL ---
 if df is not None and 'Temperatura' in df.columns and 'Data' in df.columns:
     st.subheader("Gráfico de Temperatura")
+    is_mobile = "mobile" in st.query_params
     fig = px.line(df, x='Data', y='Temperatura', markers=True, title='Variação da Temperatura')
     fig.update_layout(
         margin=dict(l=10, r=10, t=40, b=10),
         font=dict(size=16),
         plot_bgcolor='#f8f8fa',
         paper_bgcolor='#f8f8fa',
-        height=350 if st.experimental_get_query_params().get("mobile") else 500
+        height=350 if is_mobile else 500
     )
     st.plotly_chart(fig, use_container_width=True)
 
