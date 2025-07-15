@@ -9,3 +9,5 @@ scipy
 matplotlib
 streamlit-folium
 openpyxl
+earthengine-api
+geemap
