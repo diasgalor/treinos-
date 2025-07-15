@@ -10,5 +10,5 @@ matplotlib
 streamlit-folium
 openpyxl
 earthengine-api
-geemap
+geemap>=0.22.4
 setuptools>=65.0.0
