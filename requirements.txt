@@ -11,3 +11,4 @@ streamlit-folium
 openpyxl
 earthengine-api
 geemap
+setuptools>=65.0.0
