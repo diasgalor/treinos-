@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from shapely.geometry import Polygon
 from unidecode import unidecode
 import ee
-import geemap.foliumap as geemap
+import geemap
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="NDVI e Biomassa SLC", layout="wide", initial_sidebar_state="collapsed")
