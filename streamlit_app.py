@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from unidecode import unidecode
 
 # --- ESTILO MINIMALISTA APPLE ---
-st.set_page_config(layout="wide", page_title="Monitoramento Climático SLC", initial_sidebar_state="collapsed")
+st.set_page_config(layout="wide", page_title="Monitoramento Climático ", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
 body { font-family: 'SF Pro Display', 'Segoe UI', Arial, sans-serif; background: #f8f8fa; color: #222; }
@@ -40,7 +40,7 @@ h1, h2, h3 { font-weight: 700; color: #222; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌱 Monitoramento Climático SLC")
+st.title("🌱 Monitoramento Climático ")
 
 # --- FUNÇÕES ---
 def formatar_nome(nome):
@@ -120,6 +120,6 @@ if df is not None and 'Temperatura' in df.columns and 'Data' in df.columns:
 
 st.markdown("""
 <div style='text-align:center; color:#aaa; font-size:14px; margin-top:20px'>
-Feito para SLC | <span style="font-weight:600;">Design inspirado no iOS</span>
+Agricultura Inteligente | <span style="font-weight:600;">Design inspirado no iOS</span>
 </div>
 """, unsafe_allow_html=True)
